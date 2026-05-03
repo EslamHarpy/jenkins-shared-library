@@ -10,10 +10,13 @@ def call(Map config = [:]) {
         environment {
             AWS_ACCOUNT_ID = '053274260339' 
             AWS_DEFAULT_REGION = 'us-east-1' 
-            // Image name is passed dynamically from each service's Jenkinsfile
-            IMAGE_REPO_NAME = "${config.imageName}" 
-            IMAGE_TAG = "${env.BUILD_NUMBER}"
-            // Application port is passed dynamically to avoid conflicts between services
+            // Fixed ECR name to use one repository for all services
+            IMAGE_REPO_NAME = 'my-spring-petclinic' 
+            // Unique service-specific tag (e.g., service-a-15)
+            SERVICE_TAG = "${config.imageName}-${env.BUILD_NUMBER}"
+            // Unique service-latest tag (e.g., service-a-latest)
+            SERVICE_LATEST = "${config.imageName}-latest"
+            
             APP_PORT = "${config.appPort}"
             REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${IMAGE_REPO_NAME}"
         }
@@ -37,8 +40,8 @@ def call(Map config = [:]) {
             
             stage('change config') {
                 steps {
-                    // Dynamically updates the server port in application.properties
-                    sh "echo server.port=${APP_PORT} >> src/main/resources/application.properties"
+                    // Overwrite application.properties with the dynamic port
+                    sh "echo 'server.port=${APP_PORT}' > src/main/resources/application.properties"
                 }
             }
             
@@ -64,9 +67,9 @@ def call(Map config = [:]) {
             stage('Docker Build & Tag') {
                 steps {
                     script {
-                        // Builds the Docker image and tags it with Build Number and Latest
-                        sh "docker build -t ${REPOSITORY_URI}:${IMAGE_TAG} ."
-                        sh "docker tag ${REPOSITORY_URI}:${IMAGE_TAG} ${REPOSITORY_URI}:latest"
+                        // Builds image with a unique tag per service
+                        sh "docker build -t ${REPOSITORY_URI}:${SERVICE_TAG} ."
+                        sh "docker tag ${REPOSITORY_URI}:${SERVICE_TAG} ${REPOSITORY_URI}:${SERVICE_LATEST}"
                     }
                 }
             }
@@ -77,10 +80,11 @@ def call(Map config = [:]) {
                                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY', 
                                                      usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
                         sh """
-                        # Authenticate Docker with AWS ECR and push images
+                        # Authenticate Docker with AWS ECR
                         aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
-                        docker push ${REPOSITORY_URI}:${IMAGE_TAG}
-                        docker push ${REPOSITORY_URI}:latest
+                        # Push the specific build tag and the service-latest tag
+                        docker push ${REPOSITORY_URI}:${SERVICE_TAG}
+                        docker push ${REPOSITORY_URI}:${SERVICE_LATEST}
                         """
                     }
                 }
@@ -89,9 +93,10 @@ def call(Map config = [:]) {
             stage('Deploy') {
                 steps {
                     script {
-                        // Removes the old container if it exists and runs the new one
-                        sh "docker rm -f ${IMAGE_REPO_NAME} || true"
-                        sh "docker run -d -p ${APP_PORT}:${APP_PORT} --name ${IMAGE_REPO_NAME} ${REPOSITORY_URI}:latest"
+                        // Removes the old container based on the service name (config.imageName)
+                        sh "docker rm -f ${config.imageName} || true"
+                        // Runs the container using the service-specific latest tag and overrides the port via arguments
+                        sh "docker run -d -p ${APP_PORT}:${APP_PORT} --name ${config.imageName} ${REPOSITORY_URI}:${SERVICE_LATEST} --server.port=${APP_PORT}"
                     }
                 }
             }
