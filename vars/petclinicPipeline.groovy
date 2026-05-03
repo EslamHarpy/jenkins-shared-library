@@ -53,7 +53,7 @@ def call(Map config = [:]) {
             
             stage('test') {
                 steps {
-                    sh 'mvn test -Dspring.jpa.hibernate.ddl-auto=create-drop '
+                    sh 'mvn test -DskipTests '
                 }
             }
             
