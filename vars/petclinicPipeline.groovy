@@ -53,7 +53,7 @@ def call(Map config = [:]) {
             
             stage('test') {
                 steps {
-                    sh 'mvn test -DskipTests '
+                    sh 'mvn test  '
                 }
             }
             
